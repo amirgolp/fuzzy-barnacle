@@ -1,0 +1,26 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install python dependencies
+COPY pyproject.toml README.md ./
+
+# Only install the 'screener' dependencies (base + httpx)
+# We use pip to install the project in editable mode or just the deps
+# Since we don't have a requirements.txt, we install from pyproject.toml
+RUN pip install --no-cache-dir .
+
+# Copy source code
+COPY src/ src/
+COPY scripts/ scripts/
+
+# Set python path
+ENV PYTHONPATH=/app/src
+
+# Run the screener
+CMD ["python", "scripts/run_screener.py"]

@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  screener:
+    build:
+      context: .
+      dockerfile: Dockerfile.pi
+    image: quantdash-screener:latest
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - CHECK_INTERVAL_SECONDS=${CHECK_INTERVAL_SECONDS:-3600}
+      - WATCHLIST=${WATCHLIST:-AAPL,MSFT,GOOGL,AMZN,TSLA,NVDA,META,BTC-USD,ETH-USD}
+    volumes:
+      - ./logs:/app/logs

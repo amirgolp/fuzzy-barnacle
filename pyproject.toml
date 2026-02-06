@@ -1,0 +1,204 @@
+[project]
+name = "quantdash"
+version = "0.1.0"
+description = "Production-grade quantitative trading dashboard"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "QuantDash Team" }]
+
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "sqlalchemy[asyncio]>=2.0.25",
+    "alembic>=1.13.0",
+    "redis>=5.0.0",
+    "arq>=0.25.0",
+    "pandas>=2.1.0",
+    "numpy>=1.26.0",
+    "plotly>=5.18.0",
+    "yfinance>=0.2.36",
+    "httpx>=0.26.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+api = ["uvicorn[standard]>=0.27.0"]
+ui = []  # React/TypeScript web GUI (no Python dependencies)
+worker = ["arq>=0.25.0"]
+backtest = ["vectorbt>=0.26.0", "backtrader>=1.9.78"]
+optimize = ["optuna>=3.5.0", "cvxpy>=1.4.0", "scipy>=1.12.0"]
+sentiment = ["google-generativeai>=0.3.0", "feedparser>=6.0.0"]
+ml = [
+    "torch>=2.1.0",
+    "transformers>=4.35.0",
+    "stable-baselines3>=2.2.0",
+    "gymnasium>=0.29.0",
+    "fredapi>=0.5.0",
+    "h5py>=3.10.0",
+    "tensorboard>=2.15.0",
+    "scikit-learn>=1.3.0",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+    "poethepoet>=0.24.0",
+]
+all = [
+    "quantdash[api,ui,worker,backtest,optimize,sentiment,ml,dev]",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/quantdash"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
+
+# ============================================================================
+# Poethepoet Tasks
+# ============================================================================
+
+[tool.poe.tasks]
+
+# ---- Application Runners ----
+
+[tool.poe.tasks.api]
+help = "Start FastAPI backend server"
+cmd = "uvicorn quantdash.services.api.main:app --host 0.0.0.0 --port 8000 --reload"
+
+[tool.poe.tasks.api-prod]
+help = "Start FastAPI backend in production mode"
+cmd = "uvicorn quantdash.services.api.main:app --host 0.0.0.0 --port 8000 --workers 4"
+
+[tool.poe.tasks.web]
+help = "Start React/TypeScript web GUI (development)"
+shell = "cd apps/web && npm install && npm run dev"
+
+[tool.poe.tasks.web-build]
+help = "Build React/TypeScript web GUI for production"
+shell = "cd apps/web && npm install && npm run build"
+
+[tool.poe.tasks.worker]
+help = "Start background worker (arq)"
+cmd = "python -m quantdash.services.worker.main"
+
+# ---- Development Tools ----
+
+[tool.poe.tasks.test]
+help = "Run test suite"
+cmd = "pytest tests/ -v --cov=quantdash --cov-report=term-missing"
+
+[tool.poe.tasks.test-fast]
+help = "Run tests without coverage"
+cmd = "pytest tests/ -v"
+
+[tool.poe.tasks.lint]
+help = "Run ruff linter"
+cmd = "ruff check src/ tests/"
+
+[tool.poe.tasks.lint-fix]
+help = "Run ruff linter with auto-fix"
+cmd = "ruff check src/ tests/ --fix"
+
+[tool.poe.tasks.format]
+help = "Format code with ruff"
+cmd = "ruff format src/ tests/"
+
+[tool.poe.tasks.typecheck]
+help = "Run mypy type checker"
+cmd = "mypy src/quantdash"
+
+[tool.poe.tasks.check]
+help = "Run all checks (lint, typecheck, test)"
+sequence = ["lint", "typecheck", "test"]
+
+# ---- Database Management ----
+
+[tool.poe.tasks.migrate]
+help = "Run database migrations"
+cmd = "alembic upgrade head"
+
+[tool.poe.tasks.migrate-create]
+help = "Create new migration (usage: poe migrate-create 'migration message')"
+cmd = "alembic revision --autogenerate -m"
+args = [{ name = "message", positional = true, required = true }]
+
+[tool.poe.tasks.migrate-rollback]
+help = "Rollback last migration"
+cmd = "alembic downgrade -1"
+
+# ---- All-in-One Commands ----
+
+[tool.poe.tasks.dev]
+help = "Start API and web GUI concurrently (requires 'concurrently' npm package)"
+shell = """
+echo '🚀 Starting QuantDash development servers...'
+echo '   - API:  http://localhost:8000'
+echo '   - Web:  http://localhost:5173'
+echo '   - Docs: http://localhost:8000/docs'
+echo ''
+trap 'kill 0' INT
+uvicorn quantdash.services.api.main:app --host 0.0.0.0 --port 8000 --reload &
+(cd apps/web && npm run dev) &
+wait
+"""
+
+[tool.poe.tasks.dev-all]
+help = "Start API, web GUI, and worker concurrently"
+shell = """
+echo '🚀 Starting QuantDash (full stack)...'
+trap 'kill 0' INT
+uvicorn quantdash.services.api.main:app --host 0.0.0.0 --port 8000 --reload &
+(cd apps/web && npm run dev) &
+python -m quantdash.services.worker.main &
+wait
+"""
+
+[tool.poe.tasks.setup]
+help = "Initial project setup (install deps, migrate DB)"
+sequence = [
+    { shell = "uv sync --all-extras" },
+    { shell = "cd apps/web && npm install" },
+    "migrate"
+]
+
+[tool.poe.tasks.stop]
+help = "Stop all running QuantDash services"
+shell = """
+echo '🛑 Stopping all QuantDash services...'
+pkill -f 'uvicorn quantdash' 2>/dev/null && echo '   ✓ Stopped API server' || echo '   - API not running'
+pkill -f 'vite' 2>/dev/null && echo '   ✓ Stopped Vite dev server' || echo '   - Vite not running'
+pkill -f 'npm run dev' 2>/dev/null && echo '   ✓ Stopped npm dev server' || echo '   - npm not running'
+pkill -f 'quantdash.services.worker' 2>/dev/null && echo '   ✓ Stopped worker' || echo '   - Worker not running'
+echo '✓ All services stopped'
+"""
+
+[tool.poe.tasks.restart]
+help = "Restart all services (stop then start)"
+sequence = ["stop", "dev"]
