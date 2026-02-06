@@ -79,10 +79,14 @@ class TradingEnv:
         self.peak_equity = 1.0
         self.total_pnl = 0.0
 
+    def _safe_obs(self, idx: int) -> np.ndarray:
+        """Return observation with NaN/inf replaced by 0."""
+        obs = self.embeddings[idx].copy()
+        return np.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0)
+
     def reset(self, seed: int | None = None, options: dict | None = None):
         self._reset_state()
-        obs = self.embeddings[self.current_step]
-        return obs, {}
+        return self._safe_obs(self.current_step), {}
 
     def step(self, action: int):
         # Map action to position: {0: -1, 1: 0, 2: +1}
@@ -93,37 +97,40 @@ class TradingEnv:
         fee = position_change * self.fee_bps
 
         # PnL from holding position during this bar
-        bar_return = self.returns[self.current_step]
+        # Clip returns to prevent extreme values (z-scored data can have outliers)
+        bar_return = float(np.clip(self.returns[self.current_step], -0.05, 0.05))
         pnl = self.position * bar_return - fee
 
-        # Update equity
-        self.equity *= (1 + pnl)
+        # Additive equity tracking (prevents multiplicative overflow)
+        self.equity += pnl
+        self.equity = max(self.equity, 0.01)  # floor to prevent negative
         self.peak_equity = max(self.peak_equity, self.equity)
 
         # Drawdown penalty
-        drawdown = (self.peak_equity - self.equity) / max(self.peak_equity, 1e-8)
+        drawdown = max(0.0, (self.peak_equity - self.equity) / self.peak_equity)
         drawdown_penalty = self.lambda_drawdown * drawdown
 
-        # Reward
-        reward = pnl - drawdown_penalty
+        # Reward (clipped for stable PPO training)
+        reward = float(np.clip(pnl - drawdown_penalty, -1.0, 1.0))
 
         # Update state
         self.position = new_position
         self.total_pnl += pnl
         self.current_step += 1
 
-        terminated = self.current_step >= self.n_steps - 1
+        # Terminate on end of data or bankruptcy
+        terminated = self.current_step >= self.n_steps - 1 or self.equity <= 0.01
         truncated = False
 
-        obs = self.embeddings[min(self.current_step, self.n_steps - 1)]
+        obs = self._safe_obs(min(self.current_step, self.n_steps - 1))
         info = {
-            "equity": self.equity,
+            "equity": float(self.equity),
             "position": self.position,
-            "drawdown": drawdown,
-            "total_pnl": self.total_pnl,
+            "drawdown": float(drawdown),
+            "total_pnl": float(self.total_pnl),
         }
 
-        return obs, float(reward), terminated, truncated, info
+        return obs, reward, terminated, truncated, info
 
 
 def _wrap_as_gymnasium(env: TradingEnv) -> gym.Env:
@@ -173,6 +180,12 @@ def extract_fused_embeddings(
     all_embeddings = []
     all_returns = []
 
+    # Returns column index in price features: OHLCV(0-4), returns(5)
+    # These are z-score normalized (~N(0,1)). Scale to approximate real
+    # 1H return magnitudes (~0.3% std) so the RL reward is realistic.
+    RETURN_COL = 5
+    RETURN_SCALE = 0.003  # approximate 1H return volatility
+
     with torch.no_grad():
         for batch in loader:
             price = batch["price"].to(device)
@@ -183,14 +196,15 @@ def extract_fused_embeddings(
             cross_asset = batch["cross_asset"].to(device)
 
             outputs = model(price, volume, pattern, news, macro, cross_asset)
-            all_embeddings.append(outputs["fused_embedding"].cpu().numpy())
+            emb = outputs["fused_embedding"].cpu().numpy()
+            # Replace any NaN in embeddings (from model instability)
+            emb = np.nan_to_num(emb, nan=0.0, posinf=0.0, neginf=0.0)
+            all_embeddings.append(emb)
 
-            # Extract returns from price features (column 0 = returns after OHLCV)
-            # The actual returns are in the original price data
-            # For RL, use the label-implied returns
-            all_returns.append(
-                price[:, -1, 0].cpu().numpy()  # last bar's first feature as proxy
-            )
+            # Z-scored returns at last timestep, scaled to real magnitude
+            ret_col = min(RETURN_COL, price.shape[2] - 1)
+            scaled_returns = price[:, -1, ret_col].cpu().numpy() * RETURN_SCALE
+            all_returns.append(scaled_returns)
 
     embeddings = np.concatenate(all_embeddings, axis=0)
     returns = np.concatenate(all_returns, axis=0)
@@ -254,7 +268,7 @@ def train_ppo(
     )
     env = DummyVecEnv([lambda: _wrap_as_gymnasium(base_env)])
 
-    # 4. Train PPO
+    # 4. Train PPO (on CPU — MlpPolicy doesn't benefit from GPU)
     ppo = PPO(
         "MlpPolicy",
         env,
@@ -264,6 +278,7 @@ def train_ppo(
         n_epochs=rl_config.n_epochs,
         gamma=rl_config.gamma,
         verbose=1,
+        device="cpu",
     )
 
     logger.info("Starting PPO training for %d timesteps...", rl_config.total_timesteps)
