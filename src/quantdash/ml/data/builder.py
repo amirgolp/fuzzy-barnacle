@@ -81,11 +81,11 @@ def fetch_ohlcv(
     if df.empty:
         raise ValueError(f"No data returned for {symbol} ({timeframe})")
 
-    # Normalize columns to lowercase
-    df.columns = [c.lower() if isinstance(c, str) else c for c in df.columns]
-    # Handle MultiIndex columns from yfinance
+    # Handle MultiIndex columns from yfinance (e.g., ("Open", "GC=F"))
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [c[0].lower() for c in df.columns]
+    else:
+        df.columns = [c.lower() for c in df.columns]
 
     # Ensure required columns
     for col in ["open", "high", "low", "close", "volume"]:
