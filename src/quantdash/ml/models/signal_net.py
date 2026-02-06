@@ -52,10 +52,7 @@ class TemporalFusionSignalNet(nn.Module):
 
         # Output heads
         self.action_head = nn.Linear(self.config.output_d, 3)
-        self.confidence_head = nn.Sequential(
-            nn.Linear(self.config.output_d, 1),
-            nn.Sigmoid(),
-        )
+        self.confidence_head = nn.Linear(self.config.output_d, 1)
 
     def forward(
         self,
@@ -133,7 +130,7 @@ class TemporalFusionSignalNet(nn.Module):
         return {
             "action": action,
             "probabilities": probs,
-            "confidence": out["confidence"].squeeze(-1),
+            "confidence": torch.sigmoid(out["confidence"]).squeeze(-1),
             "fused_embedding": out["fused_embedding"],
         }
 

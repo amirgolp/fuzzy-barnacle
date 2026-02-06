@@ -77,7 +77,7 @@ class ConfidenceLoss(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.bce = nn.BCELoss()
+        self.bce = nn.BCEWithLogitsLoss()
 
     def forward(
         self,
@@ -87,8 +87,8 @@ class ConfidenceLoss(nn.Module):
     ) -> torch.Tensor:
         """
         Args:
-            confidence: [batch, 1] sigmoid output
-            logits: [batch, 3] raw logits
+            confidence: [batch, 1] raw logits (pre-sigmoid)
+            logits: [batch, 3] raw action logits
             targets: [batch] class indices
 
         Returns:
