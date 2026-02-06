@@ -66,7 +66,11 @@ class TradingSignalDataset(_Dataset):
         self.volume_features = volume_features.astype(np.float32)
         self.pattern_features = pattern_features.astype(np.float32)
         self.macro_session_features = macro_session_features.astype(np.float32)
-        self.labels = labels.astype(np.int64)
+        # Detect valid (non-NaN) labels BEFORE casting to int
+        self._label_valid = ~np.isnan(labels.astype(np.float64))
+        # Replace NaN with 0 before int cast to avoid garbage values
+        clean_labels = np.where(self._label_valid, labels, 0)
+        self.labels = clean_labels.astype(np.int64)
         self.lookback = lookback
         self.config = config or ModelConfig()
 
@@ -85,7 +89,7 @@ class TradingSignalDataset(_Dataset):
         # Valid indices: those with enough lookback history and valid labels
         self._valid_indices = np.array([
             i for i in range(self.lookback, self.n_samples)
-            if not np.isnan(self.labels[i])
+            if self._label_valid[i]
         ])
 
     def __len__(self) -> int:
