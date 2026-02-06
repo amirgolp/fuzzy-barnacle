@@ -55,7 +55,8 @@ class FocalLoss(nn.Module):
         focal_weight = (1 - p_t) ** self.gamma
 
         # Per-class alpha weighting
-        alpha_t = (self.alpha.unsqueeze(0) * targets_one_hot).sum(dim=-1)  # [batch]
+        alpha = self.alpha.to(logits.device)
+        alpha_t = (alpha.unsqueeze(0) * targets_one_hot).sum(dim=-1)  # [batch]
 
         # Focal loss
         loss = -alpha_t * focal_weight * torch.log(p_t.clamp(min=1e-8))
