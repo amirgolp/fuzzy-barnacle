@@ -102,7 +102,11 @@ class SupervisedTrainer:
         )
         self.tracker = MetricTracker()
 
-    def _train_epoch(self, loader: DataLoader) -> dict[str, float]:
+    def _train_epoch(
+        self,
+        loader: DataLoader,
+        scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
+    ) -> dict[str, float]:
         """Run one training epoch."""
         self.model.train()
         total_loss = 0.0
@@ -137,6 +141,10 @@ class SupervisedTrainer:
             )
             self.scaler.step(self.optimizer)
             self.scaler.update()
+
+            # Step OneCycleLR per batch (not per epoch)
+            if scheduler is not None:
+                scheduler.step()
 
             total_loss += losses["total"].item()
             total_focal += losses["focal"].item()
@@ -258,11 +266,9 @@ class SupervisedTrainer:
         for epoch in range(self.config.max_epochs):
             t0 = time.time()
 
-            train_metrics = self._train_epoch(train_loader)
+            train_metrics = self._train_epoch(train_loader, scheduler=scheduler)
             val_metrics = self._eval_epoch(val_loader)
 
-            # Step scheduler
-            # OneCycleLR steps per batch, but we need to handle per-epoch logging
             elapsed = time.time() - t0
 
             self.tracker.update({

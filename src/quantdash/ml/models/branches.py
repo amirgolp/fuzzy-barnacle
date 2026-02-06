@@ -208,8 +208,26 @@ class NewsBranch(nn.Module):
         # Create mask: True where all embeddings are zero (no article)
         key_padding_mask = (x.abs().sum(dim=-1) == 0)  # [batch, max_articles]
 
-        # If all articles are masked, return zeros
+        # If ALL articles in the entire batch are masked, skip attention
+        # to avoid NaN from softmax(-inf) — NaN * 0 = NaN in IEEE 754
         all_masked = key_padding_mask.all(dim=-1)  # [batch]
+        if all_masked.all():
+            return torch.zeros(
+                x.size(0), self.proj[-1].out_features,
+                device=x.device, dtype=x.dtype,
+            )
+
+        # For samples where all articles are masked, inject a dummy token
+        # to prevent per-sample NaN in attention
+        needs_dummy = all_masked.any()
+        if needs_dummy:
+            # Replace fully-masked rows with a small epsilon so attention
+            # doesn't produce NaN, then zero the output afterward
+            dummy = torch.full_like(x[:1, :1, :], 1e-8)
+            dummy_expanded = dummy.expand(x.size(0), x.size(1), -1)
+            x = torch.where(all_masked[:, None, None], dummy_expanded, x)
+            # Recompute mask after injection
+            key_padding_mask = (x.abs().sum(dim=-1) == 0)
 
         # Self-attention over articles
         attn_out, _ = self.attention(x, x, x, key_padding_mask=key_padding_mask)
@@ -220,8 +238,9 @@ class NewsBranch(nn.Module):
         counts = mask_expanded.sum(dim=1).clamp(min=1)  # [batch, 1]
         pooled = pooled / counts
 
-        # Zero out fully-masked samples
-        pooled = pooled * (~all_masked).unsqueeze(-1).float()
+        # Zero out fully-masked samples (safe now — no NaN to propagate)
+        if needs_dummy:
+            pooled = pooled * (~all_masked).unsqueeze(-1).float()
 
         return self.proj(pooled)
 

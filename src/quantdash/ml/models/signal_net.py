@@ -54,6 +54,12 @@ class TemporalFusionSignalNet(nn.Module):
         self.action_head = nn.Linear(self.config.output_d, 3)
         self.confidence_head = nn.Linear(self.config.output_d, 1)
 
+        # Initialize output heads for stable start
+        nn.init.xavier_uniform_(self.action_head.weight, gain=0.01)
+        nn.init.zeros_(self.action_head.bias)
+        nn.init.xavier_uniform_(self.confidence_head.weight, gain=0.01)
+        nn.init.zeros_(self.confidence_head.bias)  # sigmoid(0) = 0.5
+
     def forward(
         self,
         price: torch.Tensor,
