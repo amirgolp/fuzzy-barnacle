@@ -34,9 +34,9 @@ class SignalAction(int, Enum):
 
 class ModelConfig(BaseModel):
     """TemporalFusionSignalNet architecture hyperparameters."""
-    # Branch input dimensions
-    price_channels: int = 47
-    num_pattern_features: int = 100  # ~50 patterns x 2 (detected + confidence)
+    # Branch input dimensions (defaults match typical feature counts)
+    price_channels: int = 42  # OHLCV(5) + returns(1) + accel(1) + indicators(~35)
+    num_pattern_features: int = 106  # 53 patterns x 2 (detected + confidence)
     num_macro_features: int = 13
     cross_asset_channels: int = 20  # varies per asset (num_correlated × 5)
     max_articles: int = 10
